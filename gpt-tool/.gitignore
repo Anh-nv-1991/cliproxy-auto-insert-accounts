@@ -1,0 +1,7 @@
+# gpt-tool local secrets & runtime - khong commit
+.venv/
+out/
+free-acc*
+*.xlsx
+failed.txt
+__pycache__/
