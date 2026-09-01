@@ -27,8 +27,8 @@ FORMATS: dict[str, object] = {
 
 
 def sanitize_file_token(value: str, fallback: str = "file") -> str:
-    """Keep a value safe for filenames; fall back when nothing survives."""
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip())
+    """Keep a value safe for filenames (plus-addressing keeps `+`); fall back when nothing survives."""
+    cleaned = re.sub(r"[^A-Za-z0-9._+-]+", "_", (value or "").strip())
     return cleaned or fallback
 
 
