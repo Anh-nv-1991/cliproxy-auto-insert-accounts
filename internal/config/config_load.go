@@ -12,9 +12,39 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// expandEnvRefs expands ${VAR} references in the raw YAML data using environment
+// variables. Undefined variables are kept as-is (with a warning) so that
+// misconfiguration is easy to spot. Only the ${VAR} form is expanded; bare
+// "$VAR" sequences are left untouched to avoid corrupting values that contain
+// '$' (for example bcrypt hashes like "$2a$10$...").
+func expandEnvRefs(data []byte) []byte {
+	s := string(data)
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c == '$' && i+1 < len(s) && s[i+1] == '{' {
+			if end := strings.IndexByte(s[i+2:], '}'); end >= 0 {
+				name := s[i+2 : i+2+end]
+				if val, ok := os.LookupEnv(name); ok {
+					b.WriteString(val)
+				} else {
+					log.WithField("variable", name).Warn("environment variable referenced in config is not set; keeping placeholder")
+					b.WriteString(s[i : i+2+end+1])
+				}
+				i += 2 + end + 1
+				continue
+			}
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return []byte(b.String())
+}
+
 // LoadConfig reads a YAML configuration file from the given path,
-// unmarshals it into a Config struct, applies environment variable overrides,
-// and returns it.
+// expands ${VAR} environment variable references, unmarshals it into a
+// Config struct, and returns it.
 //
 // Parameters:
 //   - configFile: The path to the YAML configuration file
@@ -51,7 +81,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		return cfg, nil
 	}
 
-	if errValidate := validateCredentialWeightYAML(data); errValidate != nil {
+	// Expand ${VAR} environment variable references before parsing.
+	expanded := expandEnvRefs(data)
+
+	if errValidate := validateCredentialWeightYAML(expanded); errValidate != nil {
 		if optional {
 			cfgOptional := &Config{CredentialInFlight: DefaultCredentialInFlightConfig()}
 			cfgOptional.NormalizePluginsConfig()
@@ -78,7 +111,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	cfg.CredentialInFlight = DefaultCredentialInFlightConfig()
-	if err = yaml.Unmarshal(data, &cfg); err != nil {
+	if err = yaml.Unmarshal(expanded, &cfg); err != nil {
 		if optional {
 			// In cloud deploy mode, if YAML parsing fails, return empty config instead of error.
 			cfgOptional := &Config{CredentialInFlight: DefaultCredentialInFlightConfig()}
