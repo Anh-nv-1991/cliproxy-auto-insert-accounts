@@ -16,6 +16,9 @@ param(
     [int]$TimeoutMinutes = 45,
     [int]$MaxAccounts = 0,
     [int]$VerifyWaitSeconds = 45,
+    [int]$MinInvalidProbes = 2,
+    [double]$ProbeDelaySeconds = 5,
+    [switch]$SkipProbe,
     [string]$Proxy = "",
     [string]$ApiBase = "http://localhost:8317",
     [switch]$Notify,
@@ -29,10 +32,9 @@ $gptRoot = Join-Path $root "gpt-tool"
 $gptOut  = Join-Path $gptRoot "out"
 $gptPy   = Join-Path $gptRoot ".venv\Scripts\python.exe"
 $logsDir = Join-Path $root "logs"
-$sourceFiles = @(
-    (Join-Path $gptRoot "free-acc-100-28-08-2026.txt"),
-    (Join-Path $gptRoot "free-acc-53.txt")
-)
+# Nguon creds: TU DONG lay tat ca file free-acc*.txt trong gpt-tool
+# (bo qua test-fake.txt / file khac; tu thich ung khi them batch moi hoac doi ten file)
+$sourceFiles = @(Get-ChildItem $gptRoot -Filter "free-acc*.txt" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
 
 # Che do tuong tac: chay KHONG tham so (double-click .bat / tu terminal khong args)
 # -> coi nhu nguoi dang ngoai console: hoi xac nhan truoc khi chay that + giua cua so mo.
@@ -46,6 +48,11 @@ function Redact([string]$s) {
     $s = ($s -replace "`r|`n", " ")
     if ($s.Length -gt 140) { $s = $s.Substring(0, 140) + "..." }
     return $s
+}
+
+# Read-Host an toan: non-interactive (scheduler/quen -Execute) -> tra ve rong thay vi crash
+function Read-HostSafe([string]$prompt) {
+    try { return (Read-Host $prompt) } catch { return "" }
 }
 
 # Phan loai status_message cua auth entry (thu tu quan trong: DEAD truoc)
@@ -71,7 +78,7 @@ function Classify-LoginFail([string]$err) {
 $MgmtKey = (Get-Content $envFile | Where-Object { $_ -match "^MANAGEMENT_KEY=" }) -replace "^MANAGEMENT_KEY=", ""
 if (-not $MgmtKey) {
     Write-Output "Khong tim thay MANAGEMENT_KEY trong $envFile"
-    if ($interactive) { Read-Host "Nhan Enter de thoat" | Out-Null }
+    if ($interactive) { Read-HostSafe "Nhan Enter de thoat" | Out-Null }
     exit 2
 }
 $authHdr = @{ Authorization = "Bearer $MgmtKey" }
@@ -183,12 +190,12 @@ if ($MaxAccounts -gt 0 -and $matched.Count -gt $MaxAccounts) {
 if (-not $Execute) {
     Write-Output ""
     Write-Output "=== DRYRUN — ket qua du kien ==="
-    Write-Output ("Se re-login {0} acc | chunk {1} | delay {2}s/giua chunk | timeout tong {3} phut" -f $matched.Count, $Workers, $LoginDelaySeconds, $TimeoutMinutes)
+    Write-Output ("Se PROBE {0} acc bang refresh_token (KHONG login) | re-login chi voi acc INVALID x{1} probe lien tiep | delay {2}s | timeout tong {3} phut" -f $matched.Count, $MinInvalidProbes, $LoginDelaySeconds, $TimeoutMinutes)
     $matched | ForEach-Object { Write-Output ("  * {0}  ->  {1}" -f $_.Entry.email, $_.Entry.id) }
     if ($interactive) {
-        # Che do tuong tac: hoi nguoi dung truoc khi chay that
+        # Che do tuong tac: hoi nguoi dung truoc khi chay (probe + re-login co dieu kien)
         if ($matched.Count -gt 0) {
-            $ok = Read-Host ("Chay THAT de xu ly {0} acc (re-login + ghi de file)? (y/N)" -f $matched.Count)
+            $ok = Read-HostSafe ("Chay PROBE token + xu ly {0} acc (re-login CHI ap dung cho acc probe xac nhan chet)? (y/N)" -f $matched.Count)
             if ($ok -in @("y", "Y", "yes")) { $Execute = $true }
             else { Write-Output "Da huy - khong co hanh dong nao duoc thuc hien."; exit 0 }
         } else {
@@ -213,9 +220,8 @@ if (Test-Path $gptOut) { Remove-Item (Join-Path $gptOut "*") -Recurse -Force }
 New-Item -ItemType Directory -Force $gptOut | Out-Null
 Write-Output "out/ da don sach."
 
-# ---------- [4/9] GENERATE (gpt-tool) ----------
-Write-Output ""
-Write-Output ("=== [4/9] Re-login qua gpt-tool ({0} acc) ===" -f $matched.Count)
+# ---------- [4/9] GENERATE (re-login) - CHI voi acc probe xac nhan chet ----------
+# (header in sau khi probe chay xong - xem cuoi phan [3b])
 
 $deadline  = (Get-Date).AddMinutes($TimeoutMinutes)
 $tmpDir    = Join-Path ([System.IO.Path]::GetTempPath()) ("gpt-refresh-" + [guid]::NewGuid().ToString("N"))
@@ -226,15 +232,109 @@ $seLog     = Join-Path $tmpDir "stderr.log"
 
 if (-not (Test-Path $gptPy)) { Write-Output "Khong thay python venv: $gptPy"; exit 2 }
 
-$okBy    = @{}   # email -> $true
+$okBy    = @{}   # email -> $true (bao gom ca probe-heal va re-login thanh cong)
 $failBy  = @{}   # email -> error text
 $skipped = @()
 $timedOut = $false
 
+# ---------- [3b] PROBE refresh_token (KHONG login) ----------
+# Kiem tra token con song bang 1 request refresh - giong nhịp bình thường, khong tao signal bi scan.
+# Chi re-login acc bi INVALID x $MinInvalidProbes lien tiep (lan luot qua cac lan chay) - tranh scan song.
+$probeFixed = @{}; $probeWait = @{}; $toRelogin = @{}
+$reloginMatched = @()
+if ($SkipProbe) {
+    foreach ($m in $matched) { $toRelogin[$m.Entry.email.ToLower()] = $m }
+    Write-Output ""
+    Write-Output "=== [3b] PROBE bo qua (-SkipProbe) -> re-login toan bo acc matched ==="
+} else {
+    Write-Output ""
+    Write-Output "=== [3b] PROBE refresh_token (KHONG login) ==="
+    $probeDir = Join-Path $tmpDir "probe"
+    New-Item -ItemType Directory -Force $probeDir | Out-Null
+    $manifestLines = @()
+    foreach ($m in $matched) {
+        $name = $m.Entry.id
+        $dest = Join-Path $probeDir $name
+        try {
+            $enc = [uri]::EscapeDataString($name)
+            Invoke-WebRequest -Uri "$ApiBase/v0/management/auth-files/download?name=$enc" -Headers $authHdr -OutFile $dest -TimeoutSec 30
+            $manifestLines += ("{0}|{1}" -f $m.Entry.email, $dest)
+        } catch {
+            Write-Output ("  ! {0}: download auth file loi ({1}) -> dua vao hang re-login" -f $m.Entry.email, (Redact $_.Exception.Message))
+            $toRelogin[$m.Entry.email.ToLower()] = $m
+        }
+    }
+    if ($manifestLines.Count -gt 0) {
+        $manifestFile = Join-Path $tmpDir "manifest.txt"
+        Set-Content -Path $manifestFile -Value $manifestLines -Encoding UTF8
+        $probeOut = Join-Path $tmpDir "probe-stdout.log"
+        $pArgs = @('-X','utf8','probe_refresh.py','--manifest', ('"{0}"' -f $manifestFile), '--out', ('"{0}"' -f $gptOut), '--delay', ("{0}" -f $ProbeDelaySeconds))
+        if ($Proxy) { $pArgs += @('--proxy', $Proxy) }
+        $pp = Start-Process -FilePath $gptPy -ArgumentList $pArgs -WorkingDirectory $gptRoot -NoNewWindow -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError (Join-Path $tmpDir "probe-stderr.log")
+        $remainMs = [int](($deadline - (Get-Date)).TotalMilliseconds)
+        if ($remainMs -le 0 -or -not $pp.WaitForExit($remainMs)) {
+            try { $pp.Kill($true) } catch {}
+            Write-Output "Probe treo qua timeout -> coi nhu TRANSIENT, xu ly lan sau."
+        }
+        $probeText = (Get-Content $probeOut -Raw -ErrorAction SilentlyContinue) ?? ""
+        $histFile = Join-Path $logsDir "probe-history.csv"
+        foreach ($ln in ($probeText -split "`n")) {
+            if ($ln -match '^(OK|INVALID|TRANSIENT)\|([^|]+)\|(.*)$') {
+                [pscustomobject]@{
+                    timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                    email     = $Matches[2].ToLower()
+                    verdict   = $Matches[1]
+                    detail    = (Redact $Matches[3])
+                } | Export-Csv $histFile -NoTypeInformation -Encoding UTF8 -Append
+                Write-Output ("  probe {0}: {1}" -f $Matches[2].ToLower(), $Matches[1])
+            }
+        }
+        $hist = @(); if (Test-Path $histFile) { $hist = @(Import-Csv $histFile) }
+        foreach ($m in $matched) {
+            $em = $m.Entry.email.ToLower()
+            $rowsE = @($hist | Where-Object { $_.email -eq $em } | Sort-Object timestamp)
+            $lastV = if ($rowsE.Count) { $rowsE[-1].verdict } else { "TRANSIENT" }
+            if ($lastV -eq "OK") {
+                # refresh thanh cong: token moi da ghi vao out/ - upload lai la heal, KHONG can login
+                $probeFixed[$em] = $m
+                $okBy[$em] = $true
+            } elseif ($lastV -eq "INVALID") {
+                $n = 0
+                for ($i = $rowsE.Count - 1; $i -ge 0; $i--) { if ($rowsE[$i].verdict -eq "INVALID") { $n++ } else { break } }
+                if ($n -ge $MinInvalidProbes) { $toRelogin[$em] = $m }
+                else { $probeWait[$em] = "INVALID x$n - cho dat nguong $MinInvalidProbes lan probe lien tiep" }
+            } else {
+                $probeWait[$em] = "TRANSIENT - probe lai lan sau"
+            }
+        }
+        Write-Output ("Probe tong hop: heal={0} | cho={1} | re-login={2}" -f $probeFixed.Count, $probeWait.Count, $toRelogin.Count)
+        foreach ($k in $probeFixed.Keys) { Add-Report "probe" $k "" "OK - refresh thanh cong, upload token moi (khong login)" }
+        foreach ($k in $probeWait.Keys)  { Write-Output ("  WAIT {0}: {1}" -f $k, $probeWait[$k]); Add-Report "probe" $k "" "WAIT: $($probeWait[$k])" }
+        foreach ($k in $toRelogin.Keys)  { Add-Report "probe" $k "" "INVALID du nguong -> re-login" }
+    }
+}
+# Xac nhan lan cuoi trong che do tuong tac truoc khi re-login
+if ($interactive -and $toRelogin.Count -gt 0) {
+    $ok2 = Read-HostSafe ("Re-login THAT {0} acc (INVALID x{1} probe lien tiep)? (y/N)" -f $toRelogin.Count, $MinInvalidProbes)
+    if ($ok2 -notin @("y", "Y", "yes")) {
+        Write-Output "Bo qua re-login - acc van giu nguyen, lan sau probe tiep."
+        foreach ($k in @($toRelogin.Keys)) { $probeWait[$k] = "tu choi re-login - probe lai lan sau"; $toRelogin.Remove($k) }
+    }
+}
+$reloginMatched = @($matched | Where-Object { $toRelogin.ContainsKey($_.Entry.email.ToLower()) })
+
+# ---------- [4/9] header ----------
+Write-Output ""
+if ($reloginMatched.Count -eq 0) {
+    Write-Output "=== [4/9] Khong can re-login (probe da heal het / chua du nguong xac nhan) ==="
+} else {
+    Write-Output ("=== [4/9] Re-login qua gpt-tool ({0} acc xac nhan chet) ===" -f $reloginMatched.Count)
+}
+
 $chunks = @()
-for ($i = 0; $i -lt $matched.Count; $i += $Workers) {
-    $end = [Math]::Min($i + $Workers - 1, $matched.Count - 1)
-    $chunks += ,@($matched[$i..$end])
+for ($i = 0; $i -lt $reloginMatched.Count; $i += $Workers) {
+    $end = [Math]::Min($i + $Workers - 1, $reloginMatched.Count - 1)
+    $chunks += ,@($reloginMatched[$i..$end])
 }
 
 $chunkNo = 0
@@ -389,6 +489,16 @@ foreach ($m in $matched) {
         $deletedFiles += $name
         Add-Report "cleanup" $m.Entry.email $name "XOA file chet ($kind)"
         Write-Output ("  DEL  {0} ({1})" -f $m.Entry.email, $kind)
+        # Ghi vao ledger banned-accounts (de theo doi + dien tu tang dan)
+        $ledger = Join-Path $root "docs\banned-accounts.csv"
+        [pscustomobject]@{
+            confirmed_date = (Get-Date -Format "yyyy-MM-dd HH:mm")
+            email          = $m.Entry.email
+            plan           = ($m.Entry.id_token.plan_type ?? "unknown")
+            reason         = $kind
+            evidence       = "login tra ve lock/deactivate tu OpenAI (403)"
+            action         = "auth file da xoa boi script - can xoa line trong free-acc*.txt"
+        } | Export-Csv $ledger -NoTypeInformation -Encoding UTF8 -Append
     } catch {
         Add-Report "cleanup" $m.Entry.email $name "XOA LOI: $($_.Exception.Message)"
         Write-Output ("  ! {0}: xoa loi: {1}" -f $m.Entry.email, $_.Exception.Message)
@@ -405,10 +515,12 @@ Write-Output ("CSV: {0} ({1} dong)" -f $csvPath, $report.Count)
 
 $fixed        = $verifyOk.Count
 $deletedCount = $deletedFiles.Count
-# FIX #1: con lai = dead - (da fix bang re-login) - (da xoa vi khong the hoi phuc)
+# FIX #1: con lai = dead - (da heal/fix) - (da xoa vi khong the hoi phuc)
+# (probeWait tinh la con lai - chua xu ly xong, lan sau probe tiep)
 $remaining = $dead.Count - $fixed - $deletedCount
-Write-Output ("Tong ket: dead={0} | match={1} | loginOK={2} | uploaded={3} | verifyActive={4} | deleted={5} | con lai={6} (bao gom {7} thieu creds, {8} retry)" -f `
-    $dead.Count, $matched.Count, $okBy.Count, $uploaded.Count, $fixed, $deletedCount, $remaining, $unmatched.Count, ($failBy.Count + $skipped.Count))
+Write-Output ("Tong ket: dead={0} | match={1} | probe-heal={2} | probe-wait={3} | re-login={4} | loginOK={5} | uploaded={6} | verifyActive={7} | deleted={8} | con lai={9}" -f `
+    $dead.Count, $matched.Count, $probeFixed.Count, $probeWait.Count, $reloginMatched.Count, $okBy.Count, $uploaded.Count, $fixed, $deletedCount, $remaining)
+Write-Output ("          (con lai bao gom {0} thieu creds, {1} retry/fail)" -f $unmatched.Count, ($failBy.Count + $skipped.Count + $probeWait.Count))
 
 # ---------- [9/9] NOTIFY (tuy chon) ----------
 if ($Notify -and $WebhookUrl) {
@@ -446,6 +558,7 @@ if ($remaining -gt 0) { exit 1 } else { exit 0 }
     # Che do tuong tac: giua cua so mo de nguoi dung doc ket qua
     if ($interactive) {
         Write-Output ""
-        Read-Host "Nhan Enter de thoat" | Out-Null
+        Read-HostSafe "Nhan Enter de thoat" | Out-Null
     }
 }
+
