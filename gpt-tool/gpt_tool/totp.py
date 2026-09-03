@@ -1,29 +1,29 @@
-"""TOTP helpers (pyotp wrapper) shared by parser and login."""
+"""RFC 6238 TOTP + base32 secret normalize."""
 
 from __future__ import annotations
 
 import base64
-import re
 
 import pyotp
 
-_B32_RE = re.compile(r"[A-Z2-7]+")
+TIME_STEP = 30
+DIGITS = 6
 
 
 def normalize_secret(secret: str) -> str:
-    """Normalize a base32 TOTP secret: uppercase, strip spaces/dashes, validate."""
-    cleaned = re.sub(r"[\s-]+", "", (secret or "").strip()).upper()
+    cleaned = "".join(c for c in secret if not c.isspace() and c not in "-=").upper()
     if not cleaned:
         raise ValueError("totp secret is empty")
-    if not _B32_RE.fullmatch(cleaned):
-        raise ValueError("totp secret is not valid base32")
+    pad = (-len(cleaned)) % 8
     try:
-        base64.b32decode(cleaned + "=" * ((8 - len(cleaned) % 8) % 8))
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"totp secret invalid: {exc}") from exc
+        base64.b32decode(cleaned + ("=" * pad), casefold=True)
+    except Exception as exc:
+        raise ValueError(f"invalid base32 secret: {exc}") from exc
     return cleaned
 
 
-def generate_code(secret: str) -> str:
-    """Current TOTP code for a (normalized) base32 secret."""
-    return pyotp.TOTP(secret).now()
+def generate_code(secret: str, at_unix: int | None = None) -> str:
+    totp = pyotp.TOTP(normalize_secret(secret), digits=DIGITS, interval=TIME_STEP)
+    if at_unix is None:
+        return totp.now()
+    return totp.at(at_unix)

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPT-Tool</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <h1>GPT-Tool</h1>
+    <p class="sub">Export Codex từ email|pass|2fa · convert JSON · không Veriphone / SMS. Chạy local trên máy bạn.</p>
+  </header>
+  <main>
+    <section class="card">
+      <label>1. Chọn định dạng xuất (bắt buộc trước khi chạy)</label>
+      <div class="formats" id="formats"></div>
+    </section>
+    <section class="card">
+      <div class="tabs">
+        <button type="button" class="active" data-tab="export">Export Codex</button>
+        <button type="button" data-tab="convert">Convert JSON</button>
+      </div>
+      <div id="tab-export">
+        <label>Mỗi dòng: email|password|totp</label>
+        <textarea id="lines" placeholder="user@gmail.com|password|JBSWY3DPEHPK3PXP"></textarea>
+        <div class="row">
+          <div>
+            <label>Proxy (tuỳ chọn)</label>
+            <input type="text" id="proxy" placeholder="http://user:pass@host:port">
+          </div>
+          <div>
+            <label>Workers</label>
+            <input type="number" id="workers" value="2" min="1" max="8">
+          </div>
+        </div>
+        <p class="warn">Token = mật khẩu. Chỉ dùng trên máy của bạn. Tài khoản đã ver phone vẫn có thể bị OpenAI bắt add-phone — tool sẽ báo lỗi và bỏ qua, không thuê SIM.</p>
+        <div class="actions">
+          <button type="button" class="primary" id="run-export">Chạy Export</button>
+          <button type="button" class="ghost" id="open-out">Mở thư mục out/</button>
+        </div>
+      </div>
+      <div id="tab-convert" class="hidden">
+        <label>Dán JSON session / auth.json (1 hoặc nhiều tài khoản)</label>
+        <textarea id="json-in" placeholder='{"access_token":"...","email":"..."}'></textarea>
+        <div class="actions">
+          <button type="button" class="primary" id="run-convert">Chạy Convert</button>
+        </div>
+      </div>
+    </section>
+    <section class="card" id="live-card">
+      <div class="log-head">
+        <div class="log-title">
+          <span class="spinner" id="log-spinner" hidden></span>
+          <label>Nhật ký từng dòng</label>
+        </div>
+        <span id="live-summary" class="log-count">Chưa chạy.</span>
+      </div>
+      <div class="log-progress" hidden id="log-progress"><i id="log-bar"></i></div>
+      <ul id="line-log" class="line-log"></ul>
+      <p id="status" class="log-banner" hidden></p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
