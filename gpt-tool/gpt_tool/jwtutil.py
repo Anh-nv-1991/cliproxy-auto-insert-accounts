@@ -1,30 +1,38 @@
-"""Minimal JWT helpers (decode only — no signature verification needed here)."""
+"""Decode JWT payloads without verifying signatures."""
 
 from __future__ import annotations
 
 import base64
 import json
+from typing import Any
 
 
-def _b64url_decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + padding)
+def _b64url_decode(segment: str) -> bytes:
+    pad = "=" * ((4 - len(segment) % 4) % 4)
+    return base64.urlsafe_b64decode(segment + pad)
 
 
-def decode_jwt(token: str) -> dict:
-    """Decode a JWT payload without verifying the signature."""
-    parts = (token or "").split(".")
-    if len(parts) != 3:
-        raise ValueError("not a JWT (expected 3 segments)")
-    payload = json.loads(_b64url_decode(parts[1]))
-    if not isinstance(payload, dict):
-        raise ValueError("jwt payload is not an object")
-    return payload
-
-
-def claim(token: str, key: str, default=None):
-    """One claim from a JWT payload (or default)."""
+def decode_payload(token: str | None) -> dict[str, Any]:
+    if not token or not isinstance(token, str) or token.count(".") < 1:
+        return {}
     try:
-        return decode_jwt(token).get(key, default)
+        payload = token.split(".")[1]
+        data = json.loads(_b64url_decode(payload))
+        return data if isinstance(data, dict) else {}
     except Exception:
-        return default
+        return {}
+
+
+def openai_auth(payload: dict[str, Any]) -> dict[str, Any]:
+    auth = payload.get("https://api.openai.com/auth") or payload.get("auth") or {}
+    return auth if isinstance(auth, dict) else {}
+
+
+def openai_profile(payload: dict[str, Any]) -> dict[str, Any]:
+    profile = payload.get("https://api.openai.com/profile") or payload.get("profile") or {}
+    return profile if isinstance(profile, dict) else {}
+
+
+def encode_b64url_json(value: Any) -> str:
+    raw = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
