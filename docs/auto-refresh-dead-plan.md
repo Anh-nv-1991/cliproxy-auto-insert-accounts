@@ -40,22 +40,33 @@ Chỉ xử lý tài khoản **chết token** (`invalidated`), KHÔNG đụng:
                 → loại trừ QUOTA / TRANSIENT / disabled
                 → ra: danh sách email + tên file auth chết
 
- 2. SO KHỚP     email ∩ file .txt (bỏ header, chỉ giữ dòng có "@")
+ 2. SO KHỚP     email ∩ free-acc*.txt (auto-discovery, bỏ header)
                 → list "email|pass|totp"
                 → acc dead KHÔNG có trong nguồn → ghi báo cáo "chờ xử lý tay"
 
  3. DỌN out/    xoá trắng gpt-tool\out trước mỗi run (tránh đụng tên _2)
 
+ 3b. PROBE      gpt-tool\probe_refresh.py — kiểm tra refresh_token bằng
+                1 request đổi token (KHÔNG password login, KHÔNG scan được):
+                → OK       : token sống, đã rotate → upload JSON mới = heal,
+                             KHÔNG cần login
+                → INVALID  : refresh_token bị thu hồi; chỉ re-login khi
+                             INVALID >= -MinInvalidProbes lần LIÊN TIẾP
+                             (mặc định 2, lịch sử lưu logs/probe-history.csv)
+                → TRANSIENT: 5xx/429/network → bỏ qua, probe lần sau
+                * Lý do: đa số "invalidated" là tạm thời và tự hồi —
+                  re-login vội là lãng phí + tăng nguy cơ bị scan
+
  4. GENERATE    .venv\Scripts\python.exe -m gpt_tool.cli export
                 --format cpa --lines <tmp> --out out --workers 2
-                → chạy dưới -TimeoutMinutes tổng (mặc định 45)
+                → CHỈ chạy cho acc đã xác nhận chết; dưới -TimeoutMinutes tổng
 
  5. UPLOAD      POST /v0/management/auth-files (multipart)
                 → đặt tên file = id thật từ management API (ghi đè chuẩn)
 
  6. VERIFY      chờ 30-60s cho watcher nạp lại → re-query → active?
 
- 7. DỌN NHỚT    theo bảng chính sách (mục 5)
+ 7. DỌN NHỚT    theo bảng chính sách (mục 5) + append ledger banned-accounts.csv
 
  8. BÁO CÁO     log CSV (redact pass) + audit xoá + exit code (0/1/2)
 
@@ -139,6 +150,9 @@ Tham số:
   -Workers            (mặc định 2)
   -TimeoutMinutes     (mặc định 45)  timeout tổng cho bước gpt-tool
   -MaxAccounts N      (tùy chọn) giới hạn số acc/lần
+  -MinInvalidProbes N (mặc định 2) re-login CHI khi probe INVALID N lần liên tiếp
+  -ProbeDelaySeconds  (mặc định 5)  delay giữa 2 lần probe
+  -SkipProbe          bỏ qua probe, re-login trực tiếp (hành vi cũ)
   -Proxy <url>        (tùy chọn) proxy cho gpt-tool nếu OpenAI chặn
   -Notify [-WebhookUrl <url>]  cảnh báo khi có lỗi (Discord/Telegram)
 
@@ -194,6 +208,8 @@ Exit code: 0 = xong sạch / không có acc dead
 | 31/08 | 36/38 acc dead còn lại TỰ HỒI PHỤC sau khi watcher recompute (mục 12.2) — hiện 166/166 active |
 | 31/08 | Self-review: vá 3 bug (#1 exit-code, #2 tmp password cleanup, #3 regex) + mutex/source-guard/dedupe (mục 13). Validate bằng Execute 3 acc dead mới → sạch |
 | 01/09 | Thêm chế độ TƯƠNG TÁC: chạy không tham số → tự DryRun + hỏi y/N trước Execute + giữ cửa sổ (finally pause). Thêm `auto-refresh-dead.bat` launcher (pwsh 7, double-click). Chạy thật 1 acc dead mới → sạch |
+| 03/09 | Nguồn chuyển thành auto-discovery `free-acc*.txt` (file cũ đã bị đổi/xoá). Xác nhận ban thật: 6 acc (script xoá) + 7 acc nhóm 2+3 (re-login thủ công) → tạo ledger `docs/banned-accounts.csv` (13 acc, script tự append khi xoá). Nạp lại `resorts_corner4o+citer` (PLUS) OK → pool 257, 8 acc Plus còn sống |
+| 03/09 | **Anti-scan**: thêm bước PROBE (`probe_refresh.py` — kiểm tra refresh_token bằng 1 request, không login) + ngưỡng `MinInvalidProbes=2` (chỉ re-login khi INVALID 2 lần probe liên tiếp, lịch sử `logs/probe-history.csv`). Chạy thật: 3 dead → probe 3 → chỉ 1 acc xác nhận chết x2 được re-login, 2 acc chỉ probe. Test probe trên acc sống: OK + rotate token → save-back bắt buộc |
 
 ---
 
