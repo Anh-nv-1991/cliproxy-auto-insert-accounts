@@ -1,4 +1,4 @@
-# auto-refresh-dead.ps1 - Tu dong phuc hoi tai khoan bi chet token (DEAD)
+﻿# auto-refresh-dead.ps1 - Tu dong phuc hoi tai khoan bi chet token (DEAD)
 # Plan: docs/auto-refresh-dead-plan.md (v3)
 #
 # Cach dung:
