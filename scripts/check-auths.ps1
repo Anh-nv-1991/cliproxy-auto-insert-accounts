@@ -1,4 +1,4 @@
-# check-auths.ps1 — Kiểm tra nhanh sức khoẻ các tài khoản CLIProxyAPI
+﻿# check-auths.ps1 — Kiểm tra nhanh sức khoẻ các tài khoản CLIProxyAPI
 # Cách dùng:
 #   .\scripts\check-auths.ps1              -> in tổng quan + danh sách account lỗi
 #   .\scripts\check-auths.ps1 -Notify      -> chỉ cảnh báo khi CÓ lỗi (cho Task Scheduler)
