@@ -1,4 +1,4 @@
-﻿# check-auths.ps1 — Kiểm tra nhanh sức khoẻ các tài khoản CLIProxyAPI
+﻿# check-auths.ps1 -> Kiểm tra nhanh sức khoẻ các tài khoản CLIProxyAPI
 # Cách dùng:
 #   .\scripts\check-auths.ps1              -> in tổng quan + danh sách account lỗi
 #   .\scripts\check-auths.ps1 -Notify      -> chỉ cảnh báo khi CÓ lỗi (cho Task Scheduler)
@@ -64,7 +64,7 @@ if ($Quota) {
     Write-Output ("Tong hop: HOT (>=80%): {0} | WARM (50-79%): {1} | COOL (<50%): {2} | Chua du lieu: {3}" -f $hot.Count, $warm.Count, $cool.Count, ($rows.Count - $observed.Count))
     if ($hot.Count -gt 0) {
         Write-Output ""
-        Write-Output "=== ACC GAN HET QUOTA (>=80%) — uu trinh dung acc khac ==="
+        Write-Output "=== ACC GAN HET QUOTA (>=80%) -> uu trinh dung acc khac ==="
         $hot | ForEach-Object { Write-Output ("  - {0} ({1}% - reset sau {2}h)" -f $_.email, $_.primary_pct, $_.primary_reset) }
     }
     exit 0
@@ -81,12 +81,12 @@ function Classify-Err($msg) {
     return "OTHER"
 }
 $dead      = @($errors | Where-Object { (Classify-Err $_.status_message) -eq "DEAD" })
-$quota     = @($errors | Where-Object { (Classify-Err $_.status_message) -eq "QUOTA" })
+$quotaGroup = @($errors | Where-Object { (Classify-Err $_.status_message) -eq "QUOTA" })
 $transient = @($errors | Where-Object { (Classify-Err $_.status_message) -eq "TRANSIENT" })
 $other     = @($errors | Where-Object { (Classify-Err $_.status_message) -eq "OTHER" })
 
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-$summary = "[$stamp] Total=$total | OK=$($total - $errors.Count - $disabled.Count) | DEAD=$($dead.Count) | QUOTA=$($quota.Count) | TRANSIENT=$($transient.Count) | OTHER=$($other.Count) | Disabled=$($disabled.Count)"
+$summary = "[$stamp] Total=$total | OK=$($total - $errors.Count - $disabled.Count) | DEAD=$($dead.Count) | QUOTA=$($quotaGroup.Count) | TRANSIENT=$($transient.Count) | OTHER=$($other.Count) | Disabled=$($disabled.Count)"
 
 # Luon in tong quan ra console
 Write-Output $summary
@@ -103,7 +103,7 @@ function Print-Group($title, $list) {
 }
 
 Print-Group "CAN LOGIN LAI - token bi OpenAI thu hoi" $dead
-Print-Group "HET QUOTA - tu hoi theo retry_after (khong can lam gi)" $quota
+Print-Group "HET QUOTA - tu hoi theo retry_after (khong can lam gi)" $quotaGroup
 Print-Group "LOI TAM THOI - tu hoi som" $transient
 Print-Group "LOI KHAC - xem msg" $other
 
