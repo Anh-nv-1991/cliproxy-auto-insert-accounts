@@ -64,9 +64,9 @@ function Redact([string]$s) {
 }
 
 function Target-FileName([string]$email) {
-    # Convention cua auths/: email -> email_at_domain.json (giu '+', '.' va '_at_')
-    $san = ($email.Trim().ToLower()) -replace "[^a-z0-9._+-]", "_"
-    $san = $san -replace "@", "_at_"
+    # Convention cua auths/: email -> email_at_domain.json (thay @ truoc, giu '+', '.' va '_at_')
+    $san = ($email.Trim().ToLower()) -replace "@", "_at_"
+    $san = $san -replace "[^a-z0-9._+-]", "_"
     return "$san.json"
 }
 
