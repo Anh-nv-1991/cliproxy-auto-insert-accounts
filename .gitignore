@@ -69,3 +69,5 @@ docker-compose.override.yml
 
 # Recovery workspace (read outputs - khong co creds sau khi da don)
 recovered/
+auths-backup*
+backups/
