@@ -7,3 +7,6 @@ failed.txt
 __pycache__/
 retry-*.txt
 test-*.txt
+revive-*.txt
+Plus-acc.txt
+plus-accounts.txt
