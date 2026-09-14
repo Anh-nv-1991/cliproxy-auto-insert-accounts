@@ -39,3 +39,12 @@ bin
 .bmad
 _bmad
 _bmad-output
+
+# Runtime/tooling folders - monted or host-only, khong can trong image
+gpt-tool
+recovered
+auth
+gpt-tool.zip
+.claude
+.gocache
+
