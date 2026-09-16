@@ -1,4 +1,4 @@
-# _common.psm1 — module dung chung cho cac script quan tri CLIProxyAPI pool
+﻿# _common.psm1 — module dung chung cho cac script quan tri CLIProxyAPI pool
 #   check-auths.ps1 / auto-refresh-dead.ps1 / add-accounts.ps1
 # Import:  Import-Module (Join-Path $PSScriptRoot "_common.psm1")
 # Cac path resolve TU THU MUC scripts\ (tam dem $PSScriptRoot)
