@@ -1,4 +1,4 @@
-﻿# auto-refresh-dead.ps1 - Tu dong phuc hoi tai khoan bi chet token (DEAD)
+# auto-refresh-dead.ps1 - Tu dong phuc hoi tai khoan bi chet token (DEAD)
 # Plan: docs/auto-refresh-dead-plan.md (v3)
 #
 # Cach dung:
@@ -34,7 +34,7 @@ $gptPy   = Join-Path $gptRoot ".venv\Scripts\python.exe"
 $logsDir = Join-Path $root "logs"
 # Nguon creds: TU DONG lay tat ca file free-acc*.txt trong gpt-tool
 # (bo qua test-fake.txt / file khac; tu thich ung khi them batch moi hoac doi ten file)
-$sourceFiles = @(Get-ChildItem $gptRoot -Filter "free-acc*.txt" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+$sourceFiles = @(Get-ChildItem "E:\cliproxy-harness\creds" -Filter "free-acc*.txt" -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
 
 # Che do tuong tac: chay KHONG tham so (double-click .bat / tu terminal khong args)
 # -> coi nhu nguoi dang ngoai console: hoi xac nhan truoc khi chay that + giua cua so mo.
